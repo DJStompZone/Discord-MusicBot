@@ -144,26 +144,24 @@ const runIfNotControlChannel = async (player, cb) => {
 };
 
 /**
- * @param {import("../lib/clients/MusicClient").CosmicordPlayerExtended} player
- * @param {import("cosmicord.js").CosmiTrack} track
+ * @param {import('discord-player').Queue} queue
+ * @param {import('discord-player').Track} track
  */
-const updateNowPlaying = async (player, track) => {
-	return runIfNotControlChannel(player, async () => {
-		const client = getClient();
+function updateNowPlaying(queue, track) {
+    const client = getClient();
+    const channel = client.channels.cache.get(queue.metadata.channel.id);
 
-		const emb = trackStartedEmbed({ track, player });
+    if (channel) {
+        const embed = new EmbedBuilder()
+            .setTitle('Now Playing')
+            .setDescription(`**${track.title}** by **${track.author}**`)
+            .setURL(track.url)
+            .setThumbnail(track.thumbnail)
+            .setColor(client.config.embedColor);
 
-		try {
-			const nowPlaying = await client.channels.cache
-				.get(player.textChannel)
-				.send({ embeds: [emb] });
-
-			player.setNowplayingMessage(client, nowPlaying);
-		} catch (error) {
-			client.warn(error);
-		}
-	});
-};
+        channel.send({ embeds: [embed] }).catch(client.warn);
+    }
+}
 
 /**
  * @param {import("discord.js").Interaction} interaction

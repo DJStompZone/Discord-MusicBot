@@ -48,7 +48,7 @@ const command = new SlashCommand()
 			return;
 		}
 
-		let node = await client.getLavalink(client);
+		let node = await client.getDiscordPlayer(client);
 		if (!node) {
 			return interaction.reply({
 				embeds: [

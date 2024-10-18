@@ -76,7 +76,7 @@ async function runPlay(client, interaction, options) {
 
     const manager = client.manager.Engine;
 
-    const node = await client.getLavalink(client);
+    const node = await client.getDiscordPlayer(client);
 
     if (!node) {
         return interaction.reply({

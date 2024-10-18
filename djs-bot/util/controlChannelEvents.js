@@ -49,7 +49,7 @@ const handleMessageCreate = async (message) => {
 	if (!memberVC.joinable)
 		return returnError("I don't have enough permission to join your voice channel");
 
-	const node = await client.getLavalink(client);
+	const node = await client.getDiscordPlayer(client);
 	if (!node) return retDel();
 
 	const query = message.content.trim();

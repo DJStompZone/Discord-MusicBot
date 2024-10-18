@@ -7,6 +7,7 @@ const Logger = require("./Logger");
 const { app, wsApp } = require("../api/v1/dist");
 const getConfig = require("../util/getConfig");
 const MusicManager = require("./MusicManager");
+const { Player } = require('discord-player');
 
 let noBoot = false;
 
@@ -44,7 +45,7 @@ class Bot extends Client {
 			this.LoadCommands();
 
 			this.getChannel = require("../util/getChannel");
-			this.getLavalink = require("../util/getLavalink");
+			this.getDiscordPlayer = require("../util/getDiscordPlayer");
 
 			this.ms = require("pretty-ms");
 

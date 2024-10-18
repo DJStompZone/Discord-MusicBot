@@ -2,6 +2,8 @@
 
 const colors = require("colors");
 const { getClient } = require("../bot");
+const { Player } = require('discord-player');
+
 const socket = require("../api/v1/dist/ws/eventsHandler");
 const {
 	updateControlMessage,
@@ -14,111 +16,122 @@ const { trackStartedEmbed } = require("../util/embeds");
 const progressUpdater = new Map();
 
 function stopProgressUpdater(guildId) {
-	const prevInterval = progressUpdater.get(guildId);
+    const prevInterval = progressUpdater.get(guildId);
 
-	if (prevInterval) {
-		clearInterval(prevInterval);
-		progressUpdater.delete(guildId);
-	}
+    if (prevInterval) {
+        clearInterval(prevInterval);
+        progressUpdater.delete(guildId);
+    }
 }
 
-function updateProgress({ player, track }) {
-	const gid = player.guild;
-	if (!gid?.length) return;
+function updateProgress(queue, track) {
+    const guildId = queue.guild.id;
 
-	stopProgressUpdater(gid);
+    stopProgressUpdater(guildId);
 
-	progressUpdater.set(
-		gid,
-		setInterval(() => {
-			if (!player.playing || player.paused) return;
+    progressUpdater.set(
+        guildId,
+        setInterval(() => {
+            if (!queue.connection || queue.connection.paused) return;
 
-			player.position += 1000;
+            const currentPosition = queue.getPlayerTimestamp().current;
 
-			socket.handleProgressUpdate({
-				guildId: player.guild,
-				position: player.position,
-			});
-		}, 1000)
-	);
+            socket.handleProgressUpdate({
+                guildId: guildId,
+                position: currentPosition,
+            });
+        }, 1000)
+    );
 }
+
 
 function handleVoiceStateUpdate(oldState, newState) {
-	// not leaving vc
-	if (newState.channelId) return;
-
-	// not client user
-	if (newState.member.id !== newState.client.user.id) return;
-
-	const gid = newState.guild.id;
-
-	stopProgressUpdater(gid);
-	socket.handleStop({ guildId: gid });
-}
-
-function handleStop({ player }) {
-	socket.handleStop({ guildId: player.guild });
-}
-
-function handleQueueUpdate({ guildId, player }) {
-	socket.handleQueueUpdate({ guildId, player });
-}
-
-function sendTrackHistory({ player, track }) {
-	const history = player.get("history");
-	if (!history) return;
-
-	runIfNotControlChannel(player, () => {
-		const client = getClient();
-
-		client.channels.cache
-			.get(player.textChannel)
-			?.send({
-				embeds: [
-					trackStartedEmbed({ track, player, title: "Played track" }),
-				],
-			})
-			.catch(client.warn);
-	});
+	// This is no longer needed, discord-player handles this directly
+	console.warn("Voice state update event is deprecated");
+	return;
 }
 
 /**
- * @param {import("./MusicEvents").IHandleTrackStartParams}
+ * Handles the 'trackStart' discord-player event 
+ * @param {import('discord-player').Queue} queue
  */
-function handleTrackStart({ player, track }) {
-	const client = getClient();
-
-	const playedTracks = client.playedTracks;
-
-	if (playedTracks.length >= 25) playedTracks.shift();
-
-	if (!playedTracks.includes(track)) playedTracks.push(track);
-
-	updateNowPlaying(player, track);
-	updateControlMessage(player.guild, track);
-	sendTrackHistory({ player, track });
-
-	socket.handleTrackStart({ player, track });
-	socket.handlePause({ guildId: player.guild, state: player.paused });
-	handleQueueUpdate({ guildId: player.guild, player });
-
-	updateProgress({ player, track });
-
-	client.warn(
-		`Player: ${player.guild} | Track has started playing [${colors.blue(track.title)}]`
-	);
+function handleStop(queue) {
+    stopProgressUpdater(queue.guild.id);
+    socket.handleStop({ guildId: queue.guild.id });
 }
 
-function handlePause({ player, state }) {
-	socket.handlePause({ guildId: player.guild, state });
+/**
+ * Handles the 'trackStart' discord-player event 
+ * @param {import('discord-player').Queue} queue
+ */
+function handleQueueUpdate(queue) {
+    socket.handleQueueUpdate({ guildId: queue.guild.id, queue });
 }
+
+/**
+ * Sends the track history to the appropriate channel if the history exists.
+ *
+ * @param {import('discord-player').Queue} queue
+ * @param {import('discord-player').Track} track
+ */
+function sendTrackHistory(queue, track) {
+    const history = queue.history;
+    if (!history) return;
+
+    runIfNotControlChannel(queue, () => {
+        const client = getClient();
+
+        client.channels.cache
+            .get(queue.metadata.channel.id)
+            ?.send({
+                embeds: [trackStartedEmbed({ track, queue, title: 'Played track' })],
+            })
+            .catch(client.warn);
+    });
+}
+
+/**
+ * Handles the 'trackStart' discord-player event 
+ * @param {import('discord-player').Queue} queue
+ * @param {import('discord-player').Track} track
+ */
+function handleTrackStart(queue, track) {
+    const client = getClient();
+
+    const playedTracks = client.playedTracks;
+
+    if (playedTracks.length >= 25) playedTracks.shift();
+
+    if (!playedTracks.includes(track)) playedTracks.push(track);
+
+    updateNowPlaying(queue, track);
+    updateControlMessage(queue.guild.id, track);
+    sendTrackHistory(queue, track);
+
+    socket.handleTrackStart({ queue, track });
+    socket.handlePause({ guildId: queue.guild.id, state: queue.connection.paused });
+    handleQueueUpdate(queue);
+
+    updateProgress(queue, track);
+
+    client.warn(`Player: ${queue.guild.id} | Track has started playing [${track.title}]`);
+}
+
+/**
+ * Handles the 'pause' discord-player event
+ * @param {import('discord-player').Queue} queue
+ */
+function handlePause(queue) {
+    socket.handlePause({ guildId: queue.guild.id, state: queue.connection.paused });
+}
+
 
 module.exports = {
-	handleTrackStart,
-	handleQueueUpdate,
-	handleStop,
-	updateProgress,
-	stopProgressUpdater,
-	handleVoiceStateUpdate,
-	handlePause,
+    handleTrackStart,
+    handleQueueUpdate,
+    handleStop,
+    updateProgress,
+    stopProgressUpdater,
+    handleVoiceStateUpdate,
+    handlePause,
 };
