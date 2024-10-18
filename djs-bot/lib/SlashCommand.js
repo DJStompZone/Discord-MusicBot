@@ -1,4 +1,12 @@
-const { SlashCommandBuilder, SlashCommandSubcommandBuilder } = require("@discordjs/builders");
+const {
+	SlashCommandBuilder,
+	SlashCommandSubcommandBuilder,
+	EmbedBuilder,
+	CommandInteractionOptionResolver,
+	CommandInteraction,
+	PermissionsBitField,
+} = require('discord.js');
+
 const Bot = require("./Bot");
 const {
 	EmbedBuilder,
@@ -95,12 +103,8 @@ class SlashCommand extends SlashCommandBuilder {
 		return this;
 	}
 
-	/**
-	 * Set permissions for a command
-	 * @param {Array<import("discord.js").PermissionFlags>} permissions an array of permission flags
-	 */
 	setPermissions(permissions = []) {
-		this.permissions = permissions;
+		this.permissions = permissions.map(p => PermissionsBitField.Flags[p]);
 		return this;
 	}
 
@@ -238,18 +242,18 @@ class SlashCommand extends SlashCommandBuilder {
 		/** @type {{name:string, value:string}[]} */
 		let targets = interaction.options._subcommand
 			? await slashCommand?.options
-					.find(
-						(option) =>
-							option.name ===
-							interaction.options._subcommand
-					)
-					.autocompleteOptions(input, index, interaction, client)
+				.find(
+					(option) =>
+						option.name ===
+						interaction.options._subcommand
+				)
+				.autocompleteOptions(input, index, interaction, client)
 			: await slashCommand?.autocompleteOptions?.(
-					input,
-					index,
-					interaction,
-					client
-			  );
+				input,
+				index,
+				interaction,
+				client
+			);
 
 		// guards for outdated/ex other bot command,
 		// simply don't respond to render error loading message in the discord client
@@ -277,7 +281,7 @@ class SlashCommand extends SlashCommandBuilder {
 			// Sorts the array of targets and displays it according to the Levenshtein distance from the typed value
 			targets.sort((a, b) => a.levenshteinDistance - b.levenshteinDistance);
 		}
-                */
+				*/
 		return interaction.respond(targets.slice(0, 24));
 	}
 
@@ -287,14 +291,17 @@ class SlashCommand extends SlashCommandBuilder {
 		const missingUserPerms = [];
 		const missingBotPerms = [];
 
-		const member = interaction.guild.members.cache.get(interaction.member.user.id);
+		const member = interaction.member;
 
-		config.permissions?.forEach((permission) => {
-			if (!member?.permissions.has(permission.permission || permission))
-				missingUserPerms.push(
-					"`" + permissionsConfigMessageMapper(permission) + "`"
-				);
+		config.permissions?.forEach(permission => {
+			if (!member.permissions.has(permission)) {
+				missingUserPerms.push(`\`${permission}\``);
+			}
 		});
+
+		if (!interaction.guild.members.me.permissions.has(permission)) {
+			missingBotPerms.push(`\`${permission}\``);
+		}
 
 		for (const permission of config.botPermissions || []) {
 			if (
