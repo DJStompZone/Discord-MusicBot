@@ -8,11 +8,6 @@ const {
 } = require('discord.js');
 
 const Bot = require("./Bot");
-const {
-	EmbedBuilder,
-	CommandInteractionOptionResolver,
-	CommandInteraction,
-} = require("discord.js");
 const { getClient } = require("../bot");
 const { permissionsConfigMessageMapper } = require("../util/common");
 const fuzzysort = require("fuzzysort");
@@ -109,9 +104,10 @@ class SlashCommand extends SlashCommandBuilder {
 	}
 
 	setBotPermissions(permissions = []) {
-		this.botPermissions = permissions;
+		this.botPermissions = permissions.map(p => PermissionsBitField.Flags[p]);
 		return this;
 	}
+
 
 	/**
 	 * Set the available autocomplete options for a string command option
@@ -121,6 +117,28 @@ class SlashCommand extends SlashCommandBuilder {
 		this.autocompleteOptions = autocompleteOptions;
 		return this;
 	}
+
+	async handleAutocomplete(interaction) {
+		const input = interaction.options.getFocused() || '';
+		const client = getClient();
+		let options;
+
+		if (interaction.options.getSubcommand(false)) {
+			const subCommandName = interaction.options.getSubcommand();
+			const conf = this.getSubCommandConfig(subCommandName);
+
+			if (conf && conf.autocompleteOptions) {
+				options = await conf.autocompleteOptions(input, interaction, client);
+			}
+		} else if (this.autocompleteOptions) {
+			options = await this.autocompleteOptions(input, interaction, client);
+		}
+
+		if (!options) return;
+
+		return interaction.respond(options.slice(0, 25));
+	}
+
 
 	setSubCommandConfig(name, key, value) {
 		if (!this.subCommands) this.subCommands = new Map();
@@ -223,67 +241,47 @@ class SlashCommand extends SlashCommandBuilder {
 	 */
 	static async checkAutocomplete(interaction) {
 		if (!interaction.isAutocomplete()) return;
-
+	
 		const client = getClient();
-
+	
 		// Getting input from user
-		/** @type {string} */
-		let input = interaction.options.getFocused() || " ";
-
-		// Gets the index of the option in which the user is currently typing
-		/** @type {number} */
-		const index = interaction.options._hoistedOptions
-			.map((option) => option.focused)
-			.indexOf(true);
-
+		const input = interaction.options.getFocused() || '';
+	
 		const slashCommand = client.slash.get(interaction.commandName);
-
-		// Gets the autocomplete options provided by the command
-		/** @type {{name:string, value:string}[]} */
-		let targets = interaction.options._subcommand
-			? await slashCommand?.options
-				.find(
-					(option) =>
-						option.name ===
-						interaction.options._subcommand
-				)
-				.autocompleteOptions(input, index, interaction, client)
-			: await slashCommand?.autocompleteOptions?.(
-				input,
-				index,
-				interaction,
-				client
-			);
-
-		// guards for outdated/ex other bot command,
-		// simply don't respond to render error loading message in the discord client
-		if (!targets) return;
-
-		// This should make the algorithm faster by pre preparing the array, but no noticable changes
-		targets.forEach((option) => (option.filePrepared = fuzzysort.prepare(option.name)));
-		targets.map((option) => option.filePrepared);
-
-		fuzzysort.go(input, targets, {
-			threshold: -10000, // Don't return matches worse than this (higher is faster)
-			limit: 30, // Don't return more results than this (lower is faster)
-			all: false, // If true, returns all results for an empty search
-
-			key: "name", // For when targets are objects
-		});
-
-		/*
-		// Avoiding calculating levenshteing distances if it's not needed
-		if (targets.length > 1) {
-			// Assigns Levenshtein distances for each option based on what the user is currently typing
-			for (let option of targets) {
-				option.levenshteinDistance = levDistance(option.name, input);
+	
+		if (!slashCommand) return;
+	
+		// Fetch autocomplete options
+		let options;
+	
+		if (interaction.options.getSubcommand(false)) {
+			const subCommandName = interaction.options.getSubcommand();
+			const conf = slashCommand.getSubCommandConfig(subCommandName);
+	
+			if (conf && conf.autocompleteOptions) {
+				options = await conf.autocompleteOptions(input, interaction, client);
 			}
-			// Sorts the array of targets and displays it according to the Levenshtein distance from the typed value
-			targets.sort((a, b) => a.levenshteinDistance - b.levenshteinDistance);
+		} else if (slashCommand.autocompleteOptions) {
+			options = await slashCommand.autocompleteOptions(input, interaction, client);
 		}
-				*/
-		return interaction.respond(targets.slice(0, 24));
+	
+		if (!options) return;
+	
+		// Use fuzzysort to sort the options based on the input
+		const results = fuzzysort.go(input, options, {
+			key: 'name',
+			limit: 25,
+		});
+	
+		// Map the results to the format required by Discord API
+		const response = results.map(res => ({
+			name: res.obj.name,
+			value: res.obj.value,
+		}));
+	
+		return interaction.respond(response);
 	}
+	
 
 	static checkPermission(config, interaction) {
 		if (!config.permissions?.length && !config.botPermissions?.length) return;
@@ -293,26 +291,19 @@ class SlashCommand extends SlashCommandBuilder {
 
 		const member = interaction.member;
 
+		// Check user permissions
 		config.permissions?.forEach(permission => {
 			if (!member.permissions.has(permission)) {
-				missingUserPerms.push(`\`${permission}\``);
+				missingUserPerms.push(`\`${PermissionsBitField.Flags[permission] || permission}\``);
 			}
 		});
 
-		if (!interaction.guild.members.me.permissions.has(permission)) {
-			missingBotPerms.push(`\`${permission}\``);
-		}
-
-		for (const permission of config.botPermissions || []) {
-			if (
-				!interaction.guild.members.me.permissions.has(
-					permission.permission || permission
-				)
-			)
-				missingBotPerms.push(
-					"`" + permissionsConfigMessageMapper(permission) + "`"
-				);
-		}
+		// Check bot permissions
+		config.botPermissions?.forEach(permission => {
+			if (!interaction.guild.members.me.permissions.has(permission)) {
+				missingBotPerms.push(`\`${PermissionsBitField.Flags[permission] || permission}\``);
+			}
+		});
 
 		if (!missingUserPerms.length && !missingBotPerms.length) return;
 
@@ -337,7 +328,7 @@ class SlashCommand extends SlashCommandBuilder {
 			]);
 
 		missingPermsEmbed.setFooter({
-			text: "If you think this is a mistake please contact the manager of this bot in this server.",
+			text: "If you think this is a mistake, please contact the bot manager.",
 		});
 
 		return interaction.reply({
